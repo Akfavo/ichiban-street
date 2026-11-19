@@ -1917,17 +1917,21 @@ export class World {
     const rnd = mulberry(4242);
     const block = this.blockMaker(rnd);
     const P = FOUNTAIN.plinth;
+    // les rangées latérales s'arrêtent avant la gare : au-delà, le viaduc et ses
+    // piliers descendent sur un sol dégagé (sinon ils traversent les toits)
+    const endZ = 17.2;
+    const next = (z: number, d: number) => (endZ - (z + d) < 2.5 ? endZ : z + d);
     // ouest : immeubles hauts (arrière-plan)
-    for (let z = P.minZ; z < 25; ) {
-      const d = 4 + rnd() * 3;
-      block(-26, -22.2, z + 0.1, Math.min(25, z + d) - 0.1, 9, 16);
-      z += d;
+    for (let z = P.minZ; z < endZ; ) {
+      const z1 = next(z, 4 + rnd() * 3);
+      block(-26, -22.2, z + 0.1, z1 - 0.1, 9, 16);
+      z = z1;
     }
     // est : maisons basses à deux pans (côté caméra)
-    for (let z = P.minZ; z < 25; ) {
-      const d = 4 + rnd() * 2.5;
-      block(22.3, 25.8, z + 0.25, Math.min(25, z + d) - 0.25, 1.8, 2.6, 'gable');
-      z += d;
+    for (let z = P.minZ; z < endZ; ) {
+      const z1 = next(z, 4 + rnd() * 2.5);
+      block(22.3, 25.8, z + 0.25, z1 - 0.25, 1.8, 2.6, 'gable');
+      z = z1;
     }
     // entre les boutiques sud et la gare
     block(-21.9, -13.2, 14.3, 17.2, 5, 7);
@@ -2029,15 +2033,13 @@ export class World {
       }
     }
     // côtés de la place
+    // ouest : le kōban occupe la façade ; un seul immeuble, reculé derrière lui sur
+    // toute la longueur de la place (pas de façades en escalier qui s'emboîtent)
+    const koban = LOCATIONS.find((l) => l.style === 'koban');
+    const backX = (koban?.x ?? -18) - (koban?.depth ?? 0) - 0.2;
+    block(-26, backX, LAYOUT.avenueEndZ + 0.15, 17 - 0.15, 9, 11);
     for (let z = LAYOUT.avenueEndZ; z < 17; ) {
       const d = 3.5 + rnd() * 2;
-      const z0 = z + 0.15;
-      const z1 = Math.min(17, z + d) - 0.15;
-      // le kōban occupe la façade ouest de la place : on recule l'immeuble derrière lui
-      const koban = LOCATIONS.find((l) => l.style === 'koban');
-      const kx = koban?.x ?? -18;
-      const hit = koban && z1 > koban.z - koban.width / 2 - 0.3 && z0 < koban.z + koban.width / 2 + 0.3;
-      block(-26, hit ? kx - koban.depth - 0.2 : -18, z0, z1, 7, 12);
       block(18.5, 26, z + 0.25, Math.min(17, z + d) - 0.25, 2, 3, 'gable');
       z += d;
     }
