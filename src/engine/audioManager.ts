@@ -8,8 +8,11 @@
  *  - la nuit : public/music/night.mp3 en boucle ;
  *  - fondu enchaîné entre les deux au passage jour ↔ nuit.
  */
-/** début réel de la musique du trajet (secondes) : saute le blanc d'intro du fichier */
-const TRAIN_START = 1.5;
+/** musiques du trajet (jour / nuit) et leur début réel en secondes : saute le blanc d'intro du fichier */
+const TRAIN_TRACKS = {
+  day: { file: 'shinkansen.mp3', start: 1.5 },
+  night: { file: 'shinkansen-night.mp3', start: 0.75 },
+} as const;
 
 export type AudioSource = 'mp3' | 'tts' | 'none';
 
@@ -157,6 +160,7 @@ export class AudioManager {
   /* ── musique de la cinématique du shinkansen (remplace la musique du quartier) ── */
   private suspended = false;
   private train: HTMLAudioElement | null = null;
+  private trains: Partial<Record<keyof typeof TRAIN_TRACKS, HTMLAudioElement>> = {};
   private trainFade = 0;
 
   private fadeTrain(to: number, ms: number, done?: () => void) {
@@ -175,17 +179,24 @@ export class AudioManager {
     }, 30);
   }
 
-  /** lance la musique du trajet en boucle (fondu), la musique du quartier s'efface */
-  playShinkansen() {
-    if (!this.train) {
-      this.train = new Audio(this.musicUrl('shinkansen.mp3'));
-      this.train.loop = true;
-      this.train.preload = 'auto';
+  /** lance la musique du trajet (version jour ou nuit) en boucle (fondu), la musique du quartier s'efface */
+  playShinkansen(night = false) {
+    const key = night ? 'night' : 'day';
+    const track = TRAIN_TRACKS[key];
+    // l'autre version a pu rester en fondu de sortie : on la coupe net
+    window.clearInterval(this.trainFade);
+    if (this.train && this.train !== this.trains[key]) this.train.pause();
+    let el = this.trains[key];
+    if (!el) {
+      el = new Audio(this.musicUrl(track.file));
+      el.loop = true;
+      el.preload = 'auto';
+      this.trains[key] = el;
     }
-    const el = this.train;
-    // le morceau commence par ~1,5 s de quasi-silence : on démarre directement sur la musique
-    if (el.readyState >= 1) el.currentTime = TRAIN_START;
-    else el.addEventListener('loadedmetadata', () => (el.currentTime = TRAIN_START), { once: true });
+    this.train = el;
+    // le morceau commence par un court blanc : on démarre directement sur la musique
+    if (el.readyState >= 1) el.currentTime = track.start;
+    else el.addEventListener('loadedmetadata', () => (el.currentTime = track.start), { once: true });
     el.volume = 0;
     if (!this._muted && this.musicOn) {
       void el.play().catch(() => undefined);

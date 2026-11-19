@@ -25,11 +25,51 @@ const TILE = 616; // longueur d'une tuile de décor (multiple de 14 et 28)
 const BRIDGE_SPAN = 34;
 const GROUND_TILE = 96; // une répétition de la texture des rizières
 
-const HAZE = '#d6e8f2'; // brume = couleur d'horizon du ciel
-const C = {
-  skyTop: new THREE.Color('#3f86d0'),
-  skyMid: new THREE.Color('#8fc2ea'),
-  horizon: new THREE.Color(HAZE),
+/**
+ * Palettes jour / nuit. La nuit reste lisible : clair de lune bleuté assez fort,
+ * horizon encore éclairé, fenêtres des villages allumées.
+ */
+const PALETTES = {
+  day: {
+    haze: '#d6e8f2', // brume = couleur d'horizon du ciel
+    skyTop: '#3f86d0',
+    skyMid: '#8fc2ea',
+    snowLit: '#ffffff',
+    snowShade: '#c6d6ea',
+    rockTop: '#58789f',
+    rockLow: '#9ab7cf',
+    hillsFar: '#93b2cb',
+    hillsNear: '#86ad8c',
+    cloud: '#ffffff',
+    cloudOpacity: 0.92,
+    water: '#ffffff',
+    hemiSky: '#e4f3ff',
+    hemiGround: '#7d9a5c',
+    hemi: 1.5,
+    sunColor: '#fff0d8',
+    sun: 2.1,
+    ground: '#ffffff',
+  },
+  night: {
+    haze: '#4f6292',
+    skyTop: '#0b1736',
+    skyMid: '#22396a',
+    snowLit: '#dfe7f7',
+    snowShade: '#8d9cc0',
+    rockTop: '#2f3f63',
+    rockLow: '#4c6089',
+    hillsFar: '#3f5281',
+    hillsNear: '#33506a',
+    cloud: '#8e9fc8',
+    cloudOpacity: 0.55,
+    water: '#7f95c4',
+    hemiSky: '#a9bfee',
+    hemiGround: '#3e4c66',
+    hemi: 1.15,
+    sunColor: '#d3e0ff',
+    sun: 1.15,
+    ground: '#8d9cc4',
+  },
 };
 
 function canvasTex(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) {
@@ -89,7 +129,14 @@ export interface Cinematic {
   dispose(): void;
 }
 
-export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: number): Cinematic {
+export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: number, night = false): Cinematic {
+  const P = night ? PALETTES.night : PALETTES.day;
+  const HAZE = P.haze;
+  const C = {
+    skyTop: new THREE.Color(P.skyTop),
+    skyMid: new THREE.Color(P.skyMid),
+    horizon: new THREE.Color(HAZE),
+  };
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(HAZE, 90, 520);
   const camera = new THREE.PerspectiveCamera(38, 16 / 9, 1, 2600);
@@ -145,10 +192,10 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
     const geo = new THREE.LatheGeometry(prof, 160);
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const col = new Float32Array(pos.count * 3);
-    const snowLit = new THREE.Color('#ffffff');
-    const snowShade = new THREE.Color('#c6d6ea');
-    const rockTop = new THREE.Color('#58789f');
-    const rockLow = new THREE.Color('#9ab7cf');
+    const snowLit = new THREE.Color(P.snowLit);
+    const snowShade = new THREE.Color(P.snowShade);
+    const rockTop = new THREE.Color(P.rockTop);
+    const rockLow = new THREE.Color(P.rockLow);
     const haze = new THREE.Color(HAZE);
     const tmp = new THREE.Color();
     // la face éclairée regarde la caméra (le soleil est derrière elle)
@@ -209,9 +256,9 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
     scene.add(m);
     return m;
   };
-  const hillsFar = ring(1050, 30, 55, '#93b2cb', 1.7);
+  const hillsFar = ring(1050, 30, 55, P.hillsFar, 1.7);
   hillsFar.renderOrder = -7;
-  const hillsNear = ring(640, 12, 34, '#86ad8c', 0.4);
+  const hillsNear = ring(640, 12, 34, P.hillsNear, 0.4);
   hillsNear.renderOrder = -6;
 
   /* ── nuages (seuls éléments transparents, immobiles) ── */
@@ -234,7 +281,7 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
         }
       }),
     );
-    const mat = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, depthWrite: false, fog: false, opacity: 0.92 });
+    const mat = new THREE.SpriteMaterial({ map: cloudTex, color: P.cloud, transparent: true, depthWrite: false, fog: false, opacity: P.cloudOpacity });
     // angle (autour de l'axe vertical, 0 = -z), distance, hauteur, largeur
     const clouds: [number, number, number, number][] = [
       [0.05, 1300, 260, 330],
@@ -253,6 +300,75 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
       s.renderOrder = -5;
       scene.add(s);
     }
+  }
+
+  /* ── nuit : lune et étoiles (immobiles, points doux : pas de scintillement) ── */
+  if (night) {
+    const dot = own(
+      canvasTex(64, 64, (ctx) => {
+        const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+        g.addColorStop(0, 'rgba(255,255,255,1)');
+        g.addColorStop(0.35, 'rgba(255,255,255,0.85)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 64, 64);
+      }),
+    );
+    const r = mulberry(77);
+    const n = 650;
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      // hémisphère haut, au-dessus des collines (élévation > ≈ 5°), plus dense dans la bande
+      // de ciel que voit la caméra (≈ 5° → 16°)
+      const az = r() * Math.PI * 2;
+      const el = 0.09 + Math.pow(r(), 1.8) * 1.4;
+      const R = 2250;
+      pos.set([Math.cos(az) * Math.cos(el) * R, Math.sin(el) * R, Math.sin(az) * Math.cos(el) * R], i * 3);
+      const b = 0.6 + r() * 0.4;
+      col.set([b * 0.9, b * 0.94, b], i * 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const stars = new THREE.Points(
+      g,
+      new THREE.PointsMaterial({ size: 3.6, sizeAttenuation: false, map: dot, vertexColors: true, transparent: true, depthWrite: false, fog: false }),
+    );
+    stars.renderOrder = -9;
+    scene.add(stars);
+
+    const moonTex = own(
+      canvasTex(256, 256, (ctx) => {
+        // halo
+        const h = ctx.createRadialGradient(128, 128, 20, 128, 128, 128);
+        h.addColorStop(0, 'rgba(220,232,255,0.55)');
+        h.addColorStop(0.3, 'rgba(200,218,255,0.18)');
+        h.addColorStop(1, 'rgba(200,218,255,0)');
+        ctx.fillStyle = h;
+        ctx.fillRect(0, 0, 256, 256);
+        // disque, quelques mers plus sombres
+        ctx.fillStyle = '#f4f2e6';
+        ctx.beginPath();
+        ctx.arc(128, 128, 30, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(170,175,175,0.35)';
+        for (const [x, y, rr] of [
+          [118, 120, 8],
+          [136, 134, 6],
+          [130, 114, 4],
+          [114, 138, 5],
+        ])
+          ctx.beginPath(), ctx.arc(x, y, rr, 0, Math.PI * 2), ctx.fill();
+      }),
+    );
+    const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: moonTex, transparent: true, depthWrite: false, fog: false }));
+    // au-dessus du flanc du Fuji, sous les nuages : entre dans le champ quand la caméra pivote
+    const ang = 0.4;
+    moon.position.set(-Math.sin(ang) * 1500, 175, -Math.cos(ang) * 1500);
+    moon.scale.set(260, 260, 1);
+    moon.renderOrder = -9;
+    scene.add(moon);
   }
 
   /* ── sol : rizières qui défilent ── */
@@ -284,13 +400,13 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
   fieldTex.anisotropy = maxAniso;
   const GROUND = 2400;
   fieldTex.repeat.set(GROUND / GROUND_TILE, GROUND / GROUND_TILE);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(GROUND, GROUND), new THREE.MeshLambertMaterial({ map: fieldTex }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(GROUND, GROUND), new THREE.MeshLambertMaterial({ map: fieldTex, color: P.ground }));
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
-  /* ── lumières de jour ── */
-  scene.add(new THREE.HemisphereLight('#e4f3ff', '#7d9a5c', 1.5));
-  const sun = new THREE.DirectionalLight('#fff0d8', 2.1);
+  /* ── lumières (soleil le jour, lune la nuit) ── */
+  scene.add(new THREE.HemisphereLight(P.hemiSky, P.hemiGround, P.hemi));
+  const sun = new THREE.DirectionalLight(P.sunColor, P.sun);
   sun.position.set(60, 90, 80);
   scene.add(sun);
 
@@ -334,9 +450,13 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
   waterTex.wrapT = THREE.RepeatWrapping;
   waterTex.repeat.set(1, 24);
   waterTex.anisotropy = maxAniso;
-  const waterMat = new THREE.MeshBasicMaterial({ map: waterTex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const waterMat = new THREE.MeshBasicMaterial({ map: waterTex, color: P.water, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
 
   const tileBatch = new Batch();
+  // fenêtres éclairées des maisons (nuit) : matériau non éclairé, tirage aléatoire séparé
+  // pour que les villages soient identiques de jour comme de nuit
+  const glowBatch = night ? new Batch() : null;
+  const rndWin = mulberry(913);
   {
     const b = tileBatch;
     const half = TILE / 2;
@@ -400,6 +520,19 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
       b.add(ROOF, pick(roofs), x, h, z, (w + 0.7) * Math.SQRT2 * 0.72, 1.1 + rnd() * 0.5, (d + 0.7) * Math.SQRT2 * 0.72, ry);
       // soubassement de bois sombre
       b.add(BOX, '#6d5440', x, 0, z, w + 0.05, 0.35, d + 0.05, ry);
+      if (glowBatch) {
+        const c = Math.cos(ry);
+        const s = Math.sin(ry);
+        const floors = two ? [1.0, 2.35] : [1.0];
+        for (const side of [-1, 1])
+          for (const fy of floors)
+            for (const lx of [-w / 4, w / 4]) {
+              if (rndWin() < 0.35) continue; // quelques pièces dans le noir
+              const lz = side * (d / 2 + 0.04); // dépasse du mur : jamais coplanaire
+              const warm = rndWin() < 0.75 ? '#ffd08a' : '#fff1c9';
+              glowBatch.add(BOX, warm, x + lx * c + lz * s, fy - 0.35, z - lx * s + lz * c, 0.95, 0.75, 0.1, ry);
+            }
+      }
     };
     const cherry = (x: number, z: number, s = 1) => {
       b.add(BOX, '#5d4636', x, 0, z, 0.32 * s, 1.6 * s, 0.32 * s);
@@ -477,11 +610,14 @@ export function createShinkansenCinematic(canvas: HTMLCanvasElement, maxAniso: n
     }
   }
   const tileGeo = tileBatch.build(sceneryMat).geometry;
+  const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const glowGeo = glowBatch ? glowBatch.build(glowMat).geometry : null;
   const riverGeo = new THREE.PlaneGeometry(BRIDGE_SPAN - 4, 1200).rotateX(-Math.PI / 2);
   const tiles: THREE.Group[] = [];
   for (let i = 0; i < 3; i++) {
     const g = new THREE.Group();
     g.add(new THREE.Mesh(tileGeo, sceneryMat));
+    if (glowGeo) g.add(new THREE.Mesh(glowGeo, glowMat));
     const river = new THREE.Mesh(riverGeo, waterMat);
     river.position.y = 0.15;
     g.add(river);

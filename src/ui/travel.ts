@@ -91,11 +91,12 @@ export async function rideShinkansen(game: Game, dest: DistrictId, maxMs = 14000
 
   // 2. la scène est construite et compilée pendant le noir (pas d'à-coup visible)
   const canvas = game.renderer.domElement;
-  const cine = createShinkansenCinematic(canvas, game.renderer.capabilities.getMaxAnisotropy());
+  const night = game.night;
+  const cine = createShinkansenCinematic(canvas, game.renderer.capabilities.getMaxAnisotropy(), night);
   game.renderer.compile(cine.scene, cine.camera);
   game.setCinematic(cine);
   document.body.classList.add('in-cinematic');
-  audio.playShinkansen();
+  audio.playShinkansen(night);
   ambience.setSuspended(true);
   await nextFrame();
   await nextFrame();
