@@ -152,11 +152,7 @@ function setAmbience(d: DistrictId) {
     const x = l.side === 'south' ? (l.x ?? 0) : l.side === 'left' ? -fx : fx;
     return { x, z: l.side === 'south' ? l.z - 5 : l.z };
   };
-  ambience.setScene(
-    d === 'fontaine'
-      ? { izakaya: front('izakaya'), station: { x: -6.2, z: FOUNTAIN.stationZ - 2 } }
-      : { izakaya: front('izakaya'), station: front('eki') },
-  );
+  ambience.setScene({ izakaya: front('izakaya') });
 }
 setAmbience(game.district);
 

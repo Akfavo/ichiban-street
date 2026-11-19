@@ -4,7 +4,6 @@ import { ambience, type LayerId, type SfxId } from './engine/ambience';
 const LAYERS: [LayerId, string, string][] = [
   ['city', 'Rumeur de la ville', 'Fond permanent, plus discret la nuit. Une voiture passe de temps en temps.'],
   ['izakaya', 'Brouhaha de l’izakaya', 'La nuit, quand on s’approche de l’izakaya : conversations, rires, verres.'],
-  ['station', 'Mélodie de la gare', 'Près de la gare : petite mélodie de départ (originale), toutes les ~30 s.'],
 ];
 
 const SFX: [SfxId, string, string][] = [

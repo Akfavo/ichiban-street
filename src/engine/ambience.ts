@@ -10,7 +10,7 @@
  * Tout est lancé après un geste utilisateur (politique autoplay des navigateurs).
  */
 
-export type LayerId = 'city' | 'izakaya' | 'station';
+export type LayerId = 'city' | 'izakaya';
 export type SfxId = 'chime' | 'good' | 'bad' | 'success' | 'open';
 
 interface Layer {
@@ -31,14 +31,11 @@ export interface AmbienceSpot {
 export interface AmbienceScene {
   /** façade de l'izakaya */
   izakaya?: AmbienceSpot;
-  /** devant la gare */
-  station?: AmbienceSpot;
 }
 
 const LAYER_BASE: Record<LayerId, number> = {
   city: 0.11, // rumeur de la ville (le souffle « en vagues ») : moitié moins forte qu'au départ (0.22)
   izakaya: 0.32,
-  station: 0.12,
 };
 
 export class Ambience {
@@ -77,7 +74,6 @@ export class Ambience {
     this.noise = makeNoise(ctx);
     this.buildCity();
     this.buildIzakaya();
-    this.buildStation();
     this.applyMaster(1.5);
     this.refresh();
     // onglet caché / fenêtre réduite : tout se tait, comme la musique
@@ -149,8 +145,6 @@ export class Ambience {
         return this.night ? 0.6 : 1;
       case 'izakaya':
         return (1 - day) * near(this.scene.izakaya, 3, 16);
-      case 'station':
-        return near(this.scene.station, 6, 16);
     }
   }
 
@@ -356,16 +350,6 @@ export class Ambience {
     }
     o.start(t0);
     o.stop(t0 + k * 0.16 + 0.3);
-  }
-
-  /** gare : petite mélodie de départ (originale) */
-  private buildStation() {
-    const l = this.addLayer('station', () => {
-      // do mi sol mi la sol — do
-      const notes = [523.25, 659.25, 783.99, 659.25, 880, 783.99, 1046.5];
-      notes.forEach((f, i) => this.bell(l.gain, f, i * 0.26, 0.22, i === notes.length - 1 ? 2.2 : 1.2));
-      return 22 + Math.random() * 18;
-    });
   }
 
   /* ───────────────────────── effets ───────────────────────── */
