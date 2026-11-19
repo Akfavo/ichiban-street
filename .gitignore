@@ -1,0 +1,14 @@
+node_modules
+dist
+.DS_Store
+*.log
+
+# secrets : seule .env.example (vide) est publiée
+.env
+.env.*
+!.env.example
+
+# fichiers locaux
+audio-archive/
+.claude/
+.vercel
