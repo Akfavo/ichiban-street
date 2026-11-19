@@ -3,6 +3,7 @@
  * déplacements relatifs à l'écran, détection des halos et mise en scène des dialogues.
  */
 import * as THREE from 'three';
+import { Atmosphere } from './atmosphere';
 import { CAMERA, FOUNTAIN, GAMEPLAY, LAYOUT, LIGHTING, PLAYER, type DistrictId } from '../data/cityConfig';
 import { Character } from './character';
 import { Controls } from './controls';
@@ -47,6 +48,7 @@ export class Game {
   private hemi: THREE.HemisphereLight;
   /** 0 = jour, 1 = nuit (interpolé) */
   private nightF = 0;
+  private atmosphere: Atmosphere;
   private nightTarget = 0;
   private cA = new THREE.Color();
   private cB = new THREE.Color();
@@ -143,6 +145,8 @@ export class Game {
     this.player.root.position.set(this.pos.x, this.world.groundHeight(this.pos.x, this.pos.z), this.pos.z);
     this.player.setYaw(Math.PI, true);
     this.scene.add(this.player.root);
+    this.atmosphere = new Atmosphere(this.scene);
+    this.atmosphere.patchScene();
 
     this.target.set(this.pos.x, 0, this.pos.z);
     this.desiredTarget.copy(this.target);
@@ -547,6 +551,21 @@ export class Game {
     mix(LIGHTING.ground, N.ground, this.hemi.groundColor);
     this.hemi.intensity = THREE.MathUtils.lerp(LIGHTING.hemiIntensity, N.hemiIntensity, f);
     mix(LIGHTING.sun, N.sun, this.sun.color);
+    // crépuscule : teinte dorée puis rose, maximale au milieu de la transition,
+    // nulle aux deux bouts (jour et nuit restent exactement comme avant)
+    const D = LIGHTING.dusk;
+    const w = D.strength * Math.sin(Math.PI * f) ** 1.4;
+    const pink = THREE.MathUtils.smoothstep(f, 0.25, 0.7);
+    if (w > 0.0005) {
+      this.hemi.color.lerp(this.cA.set(D.goldSky).lerp(this.cB.set(D.pinkSky), pink), w * 0.75);
+      this.sun.color.lerp(this.cA.set(D.goldSun).lerp(this.cB.set(D.pinkSun), pink), w);
+      this.hemi.groundColor.lerp(this.cA.set(D.ground), w * 0.6);
+    }
+    // ciel en fond (CSS) : mêmes étapes que la lumière 3D
+    const root = document.documentElement.style;
+    root.setProperty('--dusk-gold', (w * (1 - pink)).toFixed(3));
+    root.setProperty('--dusk-pink', (w * pink).toFixed(3));
+    root.setProperty('--night', THREE.MathUtils.smoothstep(f, 0.45, 1).toFixed(3));
     this.sun.intensity = THREE.MathUtils.lerp(LIGHTING.sunIntensity, N.sunIntensity, f);
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(LIGHTING.exposure, N.exposure, f);
     for (const w of Object.values(this.worlds)) w.applyNight(f);
@@ -724,7 +743,7 @@ export class Game {
     }
 
     if (this.nightF !== this.nightTarget) {
-      const step = dt / LIGHTING.transition;
+      const step = dt / (this.nightTarget > this.nightF ? LIGHTING.transition : LIGHTING.transitionToDay);
       this.nightF = this.nightTarget > this.nightF ? Math.min(1, this.nightF + step) : Math.max(0, this.nightF - step);
       this.applyLighting();
     }
@@ -786,5 +805,6 @@ export class Game {
     // vue large (banc) : plus rien à dégager, les bâtiments redeviennent pleins
     this.world.updateOcclusion(this.seat ? [] : s.slice(0, i), this.toCamera, dt);
     this.world.updateLights(this.target, dt);
+    this.atmosphere.update(this.elapsed, dt, this.target, this.nightF);
   }
 }

@@ -347,6 +347,69 @@ export class World {
     this.spots.push({ p: new THREE.Vector3(x, y, z), i: intensity, color: new THREE.Color(color) });
   }
 
+  private glowMats = new Map<string, THREE.Material>();
+  /** halos / nappes : masqués en plein jour (opacité nulle), fondu progressif sinon */
+  private glows: THREE.Object3D[] = [];
+  /** nappe de lumière douce au sol, allumée la nuit (coordonnées locales du parent) */
+  private lightPool(parent: THREE.Object3D, x: number, z: number, w: number, d: number, color: string, night = 0.3, ry = 0) {
+    const key = `pool:${color}:${night}`;
+    let mat = this.glowMats.get(key);
+    if (!mat) {
+      mat = this.nightMat(new THREE.MeshBasicMaterial({ map: glowTexture(color), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }), 0, night, 'opacity');
+      this.glowMats.set(key, mat);
+    }
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    m.rotation.set(-Math.PI / 2, 0, ry);
+    m.position.set(x, 0.06, z);
+    m.renderOrder = 1;
+    m.raycast = () => {};
+    parent.add(m);
+    this.glows.push(m);
+    return m;
+  }
+
+  /** halo lumineux (sprite) autour d'une source, allumé la nuit */
+  private lightHalo(parent: THREE.Object3D, x: number, y: number, z: number, size: number, color: string, night = 0.85) {
+    const key = `halo:${color}:${night}`;
+    let mat = this.glowMats.get(key);
+    if (!mat) {
+      mat = this.nightMat(new THREE.SpriteMaterial({ map: glowTexture(color), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }), 0, night, 'opacity');
+      this.glowMats.set(key, mat);
+    }
+    const sp = new THREE.Sprite(mat as THREE.SpriteMaterial);
+    sp.position.set(x, y, z);
+    sp.scale.set(size, size, 1);
+    sp.raycast = () => {};
+    parent.add(sp);
+    this.glows.push(sp);
+    return sp;
+  }
+
+  /** volutes de vapeur qui montent doucement (cuisine), plus visibles la nuit */
+  private addSteam(parent: THREE.Object3D, x: number, y: number, z: number, day = 0.18, spread = 0.6) {
+    const tex = glowTexture('#ffffff');
+    const N = 7;
+    const puffs: { sp: THREE.Sprite; mat: THREE.SpriteMaterial; ph: number; dx: number }[] = [];
+    for (let i = 0; i < N; i++) {
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0, color: '#f4efe8' });
+      const sp = new THREE.Sprite(mat);
+      sp.raycast = () => {};
+      parent.add(sp);
+      puffs.push({ sp, mat, ph: i / N, dx: (i % 3 - 1) * spread * 0.4 });
+    }
+    this.animated.push((t) => {
+      const vis = day + (0.42 - day) * this.nightF;
+      for (const p of puffs) {
+        const k = (t * 0.22 + p.ph) % 1;
+        p.sp.position.set(x + p.dx + Math.sin(t * 0.8 + p.ph * 6) * 0.15 * k, y + k * 2.2, z + k * 0.35);
+        const s = 0.5 + k * 1.4;
+        p.sp.scale.set(s, s, 1);
+        // fondu d'entrée et de sortie : aucune volute n'apparaît ni ne disparaît d'un coup
+        p.mat.opacity = vis * Math.sin(Math.PI * k) ** 1.5;
+      }
+    });
+  }
+
   private buildLightPool() {
     for (let i = 0; i < LIGHTING.night.pointLights; i++) {
       const light = new THREE.PointLight(LIGHTING.night.pointColor, 0, 11, 1.6);
@@ -363,6 +426,7 @@ export class World {
     const nightNow = f > 0.5;
     for (const o of this.nightOnly) o.visible = nightNow;
     for (const o of this.dayOnly) o.visible = !nightNow;
+    for (const o of this.glows) o.visible = f > 0.002;
     if (nightNow !== this.isNight) {
       this.isNight = nightNow;
       this.refreshOpen();
@@ -577,6 +641,8 @@ export class World {
     if (loc.open !== 'day') {
       const sp = F.toWorld(0, 1.6);
       this.addSpot(sp.x, 2.3, sp.z, 0.9, shade(C.window, 0.25));
+      // lumière de la vitrine qui déborde sur le trottoir
+      this.lightPool(g, 0, 1.5, W - 1.2, 3.2, shade(C.window, 0.25), 0.42);
     }
     const door = M.std(shade(C.trim, -0.2), 0.5);
     boxAt(g, door, 0.12, 2.6, 0.12, -1.1, 0, 0.06);
@@ -640,6 +706,8 @@ export class World {
     const D = loc.depth;
     const left = loc.side === 'left';
     const ex = left ? 3.4 : -3.4; // côté opposé au PNJ
+    // plante en pot entre la porte et l'équipement de devanture
+    if (['bank', 'telecom', 'pharmacy', 'shokudo', 'figures', 'electronics'].includes(loc.style)) this.doorPlant(F, Math.sign(ex) * 1.75, 0.38, M, Math.round(Math.abs(loc.z)));
     switch (loc.style) {
       case 'konbini': {
         const cols = ['#2f8f4e', '#2a6fdb', '#e8a317'];
@@ -655,7 +723,7 @@ export class World {
       case 'ramen': {
         const noren = M.tex(norenTexture('#1f2a44', 'らーめん'));
         noren.side = THREE.DoubleSide;
-        planeAt(g, noren, 2.4, 0.9, 0, 2.15, 0.35);
+        this.swayNoren(planeAt(g, noren, 2.4, 0.9, 0, 2.15, 0.35), 0.9, loc.z);
         const lmat = this.nightMat(M.tex(lanternTexture('ら'), 0.6, 0.9), 0.9, 1.9);
         const cap = M.std('#1a1a1a');
         for (const s of [-1.9, 1.9]) {
@@ -664,6 +732,10 @@ export class World {
         }
         const lp = F.toWorld(0, 0.9);
         this.addSpot(lp.x, 2.2, lp.z, 0.8, '#ff7a4a');
+        for (const s of [-1.9, 1.9]) this.lightHalo(g, s, 2.25, 0.75, 1.7, '#ff7a4a', 0.75);
+        this.lightPool(g, 0, 1.3, 5.2, 3.0, '#ff8a55', 0.42);
+        // vapeur des bouillons qui s'échappe au-dessus du noren
+        this.addSteam(g, 0, 2.75, 1.5);
         // distributeur de tickets
         boxAt(g, M.std('#e9e4da', 0.5), 0.8, 1.6, 0.6, ex, 0, 0.4);
         planeAt(g, M.tex(panelTexture(['しょっけん', '¥ 900〜'], '#c0392b', '#ffffff', 256, 256, 60), 0.5, 0.5), 0.6, 0.6, ex, 1.2, 0.71);
@@ -791,7 +863,7 @@ export class World {
         F.collider(this.collision, ex, 0.45, 1.1, 0.7);
         // noren
         const noren = M.tex(stripeTexture('#2f4a3a', '#26402f', 4));
-        planeAt(g, noren, 2.0, 0.7, 0, 2.15, 0.1);
+        this.swayNoren(planeAt(g, noren, 2.0, 0.7, 0, 2.15, 0.12), 0.7, loc.z);
         break;
       }
       case 'koban': {
@@ -802,6 +874,8 @@ export class World {
         g.add(sph);
         const pp = F.toWorld(0, 0.8);
         this.addSpot(pp.x, 3.4, pp.z, 0.8, '#ff6a50');
+        this.lightHalo(g, 0, 3.66, 0.5, 1.4, '#ff5a40', 0.8);
+        this.lightPool(g, 0, 1.1, 3.2, 2.6, '#ff6a50', 0.32);
         planeAt(g, M.tex(panelTexture(['KOBAN', 'POLICE BOX'], '#ffffff', '#24365e', 256, 160, 52), 0.5, 0.3), 1.1, 0.7, ex * 0.7, 1.5, 0.05);
         break;
       }
@@ -885,6 +959,7 @@ export class World {
         const p = F.toWorld(x, canopyD / 2);
         this.addSpot(p.x, 3.1, p.z, 1.1, '#fff1d0');
       }
+      this.lightPool(g, x, canopyD / 2, 3.6, 3.4, '#fff1d0', 0.29);
     }
     this.occluders.push({ box: F.box3(0, canopyD / 2, 20, canopyD, 3.4, 3.9), mats: [cm], opacity: 1 });
 
@@ -1128,6 +1203,7 @@ export class World {
         for (const dz of [-0.55, 0.55]) this.buildVending(s * (LAYOUT.frontX + 0.45), z + dz, s < 0 ? Math.PI / 2 : -Math.PI / 2, vi++);
         this.collision.addRect(s * (LAYOUT.frontX + 0.45), z, 0.8, 2.1);
         this.addSpot(s * (LAYOUT.frontX - 0.6), H + 1.3, z, 0.7, '#dff4ff');
+        this.lightPool(this.root, s * (LAYOUT.frontX - 0.4), z, 3.0, 3.8, '#cfeaff', 0.32).position.y += H;
       }
     }
 
@@ -1287,6 +1363,9 @@ export class World {
 
   private buildPlaza() {
     const H = LAYOUT.sidewalkHeight;
+    // vélos garés le long du mur de la konbini, dans la ruelle (côté caméra)
+    ['#e9e4d8', '#3d6b8f', '#b8323a'].forEach((c, i) => this.parkedBike(-11.6 - i * 1.75, -6.45, i % 2 ? 0.04 : -0.03, c));
+    this.collision.addRect(-13.35, -6.45, 5.2, 0.8);
     const wood = shared.std('#a06a3c', 0.8);
     const metal = shared.std('#55595e', 0.5);
     const bench = (x: number, z: number, rot: number) => {
@@ -1436,6 +1515,7 @@ export class World {
     this.collision.addRect(ax, gz, 2.2, 0.85);
     const sp = { x: ax, z: gz - 0.8 };
     this.addSpot(sp.x, H + 3.2, sp.z, 1, '#dff0ff');
+    this.lightPool(this.root, sp.x, sp.z - 0.6, 4.6, 3.6, '#dff0ff', 0.32).position.y += H;
     this.occluders.push({ box: new THREE.Box3(new THREE.Vector3(ax - 2.4, H + 3.4, gz - 0.3), new THREE.Vector3(ax + 2.4, H + 6.5, gz + 0.3)), mats: M.list, opacity: 1 });
     this.groundChevrons(ax, 9.6, 12.6, 3, Math.PI);
   }
@@ -1625,6 +1705,7 @@ export class World {
       wtex.offset.set(t * 0.012, t * 0.008);
     });
     this.addSpot(fx, H + 1.4, fz, 1.2, '#cfeeff');
+    this.lightPool(this.root, fx, fz, 11, 11, '#cfeeff', 0.32).position.y += H;
     this.collision.addRect(fx, fz, 7.0, 4.6);
     this.collision.addRect(fx, fz, 4.6, 7.0);
     this.collision.addRect(fx, fz, 6.0, 6.0);
@@ -1721,6 +1802,7 @@ export class World {
       for (const dz of [-0.55, 0.55]) this.buildVending(s * (FOUNTAIN.frontX + 0.45), z + dz, s < 0 ? Math.PI / 2 : -Math.PI / 2, vi++);
       this.collision.addRect(s * (FOUNTAIN.frontX + 0.45), z, 0.8, 2.1);
       this.addSpot(s * (FOUNTAIN.frontX - 0.6), H + 1.3, z, 0.7, '#dff4ff');
+      this.lightPool(this.root, s * (FOUNTAIN.frontX - 0.4), z, 3.0, 3.8, '#cfeaff', 0.32).position.y += H;
     };
     vend(-1, 2.5);
     vend(1, -10.5);
@@ -1760,10 +1842,13 @@ export class World {
       roof.castShadow = true;
       l.add(roof);
       this.addSpot(s * 3.4, H + 1.2, tz + 0.4, 0.6, '#ffcf8a');
+      this.lightHalo(l, 0, 1.22, 0, 2.3, '#ffcf8a', 0.75);
+      this.lightPool(l, 0, 0.6, 3.2, 3.2, '#ffcf8a', 0.42);
     }
     // muret bas au nord (ouvert devant le torii)
     const wall = shared.std('#c4bcae', 0.9);
     for (const s of [-1, 1]) boxAt(this.root, wall, 18.6, 0.6, 0.4, s * 12.7, H, -27.3);
+    this.sleepingCat(-5.4, H + 0.6, -27.3, 0.1, '#3a3330', '#f1ece4');
 
     // cerisiers en fleurs + pétales qui tombent
     const trunkM = shared.std('#5b3f2e', 0.9);
@@ -1888,6 +1973,7 @@ export class World {
       boxAt(g, this.nightMat(M.glow('#eef6ff', 1.2), 1.2, 3.0), 2, 0.05, 0.25, x, 3.5, canopyD / 2, false);
       const p = F.toWorld(x, canopyD / 2);
       if (x % 12 === 0) this.addSpot(p.x, 3.1, p.z, 1.0, '#eef6ff');
+      this.lightPool(g, x, canopyD / 2, 3.6, 3.4, '#eef6ff', 0.26);
     }
     this.occluders.push({ box: F.box3(0, canopyD / 2, 30, canopyD, 3.4, 3.9), mats: [cm], opacity: 1 });
 
@@ -1916,6 +2002,7 @@ export class World {
   private buildFountainFillers() {
     const rnd = mulberry(4242);
     const block = this.blockMaker(rnd);
+    const lr = mulberry(78);
     const P = FOUNTAIN.plinth;
     // les rangées latérales s'arrêtent avant la gare : au-delà, le viaduc et ses
     // piliers descendent sur un sol dégagé (sinon ils traversent les toits)
@@ -1924,7 +2011,8 @@ export class World {
     // ouest : immeubles hauts (arrière-plan)
     for (let z = P.minZ; z < endZ; ) {
       const z1 = next(z, 4 + rnd() * 3);
-      block(-26, -22.2, z + 0.1, z1 - 0.1, 9, 16);
+      const h = block(-26, -22.2, z + 0.1, z1 - 0.1, 9, 16);
+      if (z1 - z > 3.4 && lr() < 0.6) this.laundryBalcony(-22.2, LAYOUT.sidewalkHeight + h - 2.6 - Math.floor(lr() * 2) * 2.6, (z + z1) / 2, lr);
       z = z1;
     }
     // est : maisons basses à deux pans (côté caméra)
@@ -1942,6 +2030,178 @@ export class World {
       block(x + 0.2, Math.min(26, x + w) - 0.2, 26.4, 32.6, 10, 20);
       x += w;
     }
+  }
+
+  /* ───────────────────────── petites scènes de vie ───────────────────────── */
+
+  /** noren (rideau d'entrée) qui ondule doucement, accroché par le haut */
+  private swayNoren(m: THREE.Mesh, h: number, ph = 0) {
+    m.geometry.translate(0, -h / 2, 0);
+    m.position.y += h / 2;
+    this.animated.push((t) => {
+      // ne balance que vers la rue : jamais à travers la façade
+      m.rotation.x = -0.06 * (0.55 + 0.45 * Math.sin(t * 1.1 + ph) + 0.12 * Math.sin(t * 2.7 + ph * 2));
+    });
+  }
+
+  /** chat roulé en boule qui dort (respiration lente, oreille qui frémit) */
+  private sleepingCat(x: number, y: number, z: number, rotY: number, fur: string, head: string) {
+    const c = new THREE.Group();
+    c.position.set(x, y, z);
+    c.rotation.y = rotY;
+    this.root.add(c);
+    const furM = shared.std(fur, 0.95);
+    const headM = shared.std(head, 0.95);
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12), furM);
+    body.scale.set(1.25, 0.6, 0.85);
+    body.position.y = 0.11;
+    body.castShadow = true;
+    c.add(body);
+    const hd = new THREE.Mesh(new THREE.SphereGeometry(0.105, 14, 10), headM);
+    hd.position.set(0.17, 0.1, 0.07);
+    hd.castShadow = true;
+    c.add(hd);
+    const ears: THREE.Mesh[] = [];
+    for (const s of [-1, 1]) {
+      const e = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.07, 4), headM);
+      e.position.set(0.19, 0.2, 0.07 + s * 0.05);
+      e.rotation.z = -0.35;
+      c.add(e);
+      ears.push(e);
+    }
+    const tail = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.032, 6, 16, Math.PI * 1.05), furM);
+    tail.rotation.x = -Math.PI / 2;
+    tail.rotation.z = Math.PI * 0.05;
+    tail.position.y = 0.04;
+    c.add(tail);
+    this.animated.push((t) => {
+      const b = Math.sin(t * 1.7 + x);
+      body.scale.y = 0.6 * (1 + 0.05 * b);
+      hd.position.y = 0.1 + 0.004 * b;
+      // de temps en temps, une oreille frémit (mouvement doux, sans à-coup)
+      ears[0].rotation.x = 0.35 * Math.pow(Math.max(0, Math.sin(t * 0.7 + z)), 24);
+    });
+  }
+
+  /** vélo de ville (mamachari) garé, posé sur sa béquille */
+  private parkedBike(x: number, z: number, rotY: number, frame: string) {
+    const b = new THREE.Group();
+    b.position.set(x, LAYOUT.sidewalkHeight, z);
+    b.rotation.y = rotY;
+    b.rotation.x = 0.04;
+    this.root.add(b);
+    const fm = shared.std(frame, 0.5);
+    const tire = shared.std('#2a2a2a', 0.8);
+    const chrome = shared.std('#b9bcc0', 0.35);
+    for (const wx of [-0.5, 0.52]) {
+      const w = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.03, 6, 22), tire);
+      w.position.set(wx, 0.33, 0);
+      w.castShadow = true;
+      b.add(w);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 8), chrome);
+      hub.rotation.x = Math.PI / 2;
+      hub.position.set(wx, 0.33, 0);
+      b.add(hub);
+    }
+    const up = new THREE.Vector3(0, 1, 0);
+    const rod = (ax: number, ay: number, bx: number, by: number, r: number, m: THREE.Material, az = 0, bz = 0) => {
+      const a = new THREE.Vector3(ax, ay, az);
+      const d = new THREE.Vector3(bx, by, bz).sub(a);
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, d.length(), 6), m);
+      mesh.position.copy(a).addScaledVector(d, 0.5);
+      mesh.quaternion.setFromUnitVectors(up, d.normalize());
+      mesh.castShadow = true;
+      b.add(mesh);
+    };
+    // cadre bas (col de cygne), fourche, tige de selle, guidon
+    rod(-0.5, 0.33, -0.18, 0.4, 0.028, fm);
+    rod(-0.18, 0.4, 0.38, 0.62, 0.028, fm);
+    rod(-0.18, 0.4, -0.24, 0.8, 0.025, fm);
+    rod(-0.5, 0.33, -0.24, 0.72, 0.02, fm);
+    rod(0.52, 0.33, 0.4, 0.92, 0.024, chrome);
+    rod(0.4, 0.95, 0.4, 0.95, 0.018, chrome, -0.24, 0.24);
+    boxAt(b, shared.std('#3a2f2a', 0.7), 0.24, 0.06, 0.12, -0.25, 0.8, 0);
+    // panier avant + garde-boue
+    boxAt(b, shared.std('#9aa0a6', 0.45), 0.26, 0.2, 0.32, 0.6, 0.78, 0);
+    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.018, 4, 12, Math.PI * 0.6), fm);
+    guard.position.set(-0.5, 0.33, 0);
+    guard.rotation.z = Math.PI * 0.25;
+    b.add(guard);
+  }
+
+  private clothMats = new Map<string, THREE.MeshStandardMaterial>();
+  /** petit balcon avec du linge qui sèche (façade orientée vers +x) */
+  private laundryBalcony(x: number, y: number, z: number, rnd: () => number) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    this.root.add(g);
+    const concrete = shared.std('#d8d4cc', 0.85);
+    boxAt(g, concrete, 0.8, 0.1, 2.6, 0.4, 0, 0);
+    boxAt(g, concrete, 0.06, 0.8, 2.6, 0.77, 0.1, 0, true);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.4, 6), shared.std('#9aa0a6', 0.4));
+    pole.rotation.x = Math.PI / 2;
+    pole.position.set(0.5, 1.7, 0);
+    g.add(pole);
+    const cols = ['#ffffff', '#cfe3f2', '#f6c9d3', '#fbe7a8', '#bfe0c4', '#f2f2f2'];
+    const pivots: THREE.Object3D[] = [];
+    let cz = -1.0;
+    while (cz < 1.0) {
+      const w = 0.32 + rnd() * 0.25;
+      const h = 0.4 + rnd() * 0.3;
+      if (cz + w > 1.1) break;
+      const pv = new THREE.Object3D();
+      pv.position.set(0.5, 1.7, cz + w / 2);
+      g.add(pv);
+      const col = cols[Math.floor(rnd() * cols.length)];
+      let mat = this.clothMats.get(col);
+      if (!mat) {
+        mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.9, side: THREE.DoubleSide });
+        this.clothMats.set(col, mat);
+      }
+      const cloth = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+      cloth.rotation.y = Math.PI / 2;
+      cloth.position.y = -h / 2;
+      cloth.castShadow = true;
+      pv.add(cloth);
+      pivots.push(pv);
+      cz += w + 0.08;
+    }
+    this.animated.push((t) => {
+      pivots.forEach((pv, i) => {
+        pv.rotation.z = 0.05 * Math.sin(t * 1.3 + i * 0.9 + z) + 0.02 * Math.sin(t * 3.1 + i);
+      });
+    });
+  }
+
+  /** plante en pot près d'une porte (coordonnées locales de la boutique) */
+  private doorPlant(F: Frame, lx: number, lz: number, M: MatSet, kind: number) {
+    const g = F.group;
+    cylAt(g, M.std(kind % 2 ? '#b8643e' : '#e7e1d6', 0.8), 0.24, 0.18, 0.42, lx, 0, lz, 12);
+    // terre : son dessus dépasse nettement le bord du pot (sinon les deux faces se superposent et scintillent)
+    cylAt(g, M.std('#4a3626', 0.95), 0.21, 0.21, 0.04, lx, 0.4, lz, 12, false);
+    const leafA = shared.std('#5f9a4a', 0.85);
+    const leafB = shared.std('#7bb35a', 0.85);
+    if (kind % 2) {
+      // petit arbuste rond
+      for (let k = 0; k < 3; k++) {
+        const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.24 - k * 0.04, 0), k % 2 ? leafB : leafA);
+        f.position.set(lx + (k - 1) * 0.06, 0.62 + k * 0.17, lz + (k % 2) * 0.05);
+        f.rotation.set(k, k * 2, k * 3);
+        f.castShadow = true;
+        g.add(f);
+      }
+    } else {
+      // plante à longues feuilles
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        const lf = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.6, 4), k % 2 ? leafB : leafA);
+        lf.position.set(lx + Math.cos(a) * 0.08, 0.7, lz + Math.sin(a) * 0.08);
+        lf.rotation.set(Math.sin(a) * 0.45, 0, -Math.cos(a) * 0.45);
+        lf.castShadow = true;
+        g.add(lf);
+      }
+    }
+    F.collider(this.collision, lx, lz, 0.5, 0.5);
   }
 
   /* ───────────────────────── bâtiments de fond ───────────────────────── */
@@ -1993,10 +2253,14 @@ export class World {
 
   private fillerSides(rnd: () => number, block: ReturnType<World['blockMaker']>) {
     const H = LAYOUT.sidewalkHeight;
+    const lr = mulberry(77); // détails de vie : tirage séparé (ne change pas les immeubles)
     // ouest : immeubles hauts derrière les boutiques
     for (let z = LAYOUT.plinth.minZ; z < LAYOUT.avenueEndZ; ) {
       const d = 4 + rnd() * 3;
-      block(-26, -19 + rnd() * 0.3, z + 0.1, Math.min(LAYOUT.avenueEndZ, z + d) - 0.1, 9, 17);
+      const mx = -19 + rnd() * 0.3;
+      const z1 = Math.min(LAYOUT.avenueEndZ, z + d) - 0.1;
+      const h = block(-26, mx, z + 0.1, z1, 9, 17);
+      if (z1 - z > 3.4 && lr() < 0.6) this.laundryBalcony(mx, H + h - 2.6 - Math.floor(lr() * 2) * 2.6, (z + z1) / 2, lr);
       z += d;
     }
     this.collision.addRect(-22.4, (LAYOUT.plinth.minZ + LAYOUT.avenueEndZ) / 2, 7.2, LAYOUT.avenueEndZ - LAYOUT.plinth.minZ);
@@ -2032,6 +2296,8 @@ export class World {
         this.collision.addRect(s * 18.8, z, 0.3, 3);
       }
     }
+    // un chat roux endormi sur un muret de ruelle (bout visible depuis la caméra)
+    this.sleepingCat(18.8, H + 1.4, DECOR.vendingGapsZ[2] - 0.95, Math.PI / 2, '#e39a4e', '#eaa860');
     // côtés de la place
     // ouest : le kōban occupe la façade ; un seul immeuble, reculé derrière lui sur
     // toute la longueur de la place (pas de façades en escalier qui s'emboîtent)
@@ -2095,6 +2361,7 @@ export class World {
     noren.side = THREE.DoubleSide;
     const hang = planeAt(g, noren, 2.4, 0.95, 0, 2.12, 0.38);
     hang.castShadow = true;
+    this.swayNoren(hang, 0.95, loc.z);
     const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.7, 8), woodL);
     rod.rotation.z = Math.PI / 2;
     rod.position.set(0, 2.6, 0.38);
@@ -2126,6 +2393,8 @@ export class World {
       const wp = F.toWorld(s, 1.0);
       this.addSpot(wp.x, 2.0, wp.z, 1.1, '#ff7a45');
     }
+    this.lightPool(g, 0, 1.4, W - 0.6, 3.4, '#ff8a55', 0.3);
+    this.addSteam(g, 0, 2.75, 1.5, 0); // ouvert la nuit seulement
     // guirlande de petites lanternes sous l'auvent
     const mini = this.nightMat(M.glow('#ffe2a8', 0.1), 0.1, 1.7);
     for (let i = 0; i < 9; i++) {

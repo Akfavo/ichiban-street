@@ -1464,13 +1464,25 @@ body.in-dialogue .minimap {
   .nb-card .modal-foot .tool { padding: 4px 10px; font-size: 0.78rem; white-space: nowrap; }
 }
 
+/* ───────── coucher de soleil (piloté par le jeu : --dusk-gold, --dusk-pink) ───────── */
+#sky::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 650px at 78% 12%, rgba(255, 196, 110, calc(var(--dusk-gold, 0) * 0.9)), transparent 62%),
+    radial-gradient(1000px 700px at 50% 100%, rgba(255, 120, 150, calc(var(--dusk-pink, 0) * 0.75)), transparent 70%),
+    linear-gradient(180deg, rgba(240, 120, 150, calc(var(--dusk-pink, 0) * 0.7)) 0%, rgba(150, 100, 170, calc(var(--dusk-pink, 0) * 0.7)) 100%),
+    linear-gradient(180deg, rgba(255, 170, 90, calc(var(--dusk-gold, 0) * 0.55)) 0%, rgba(250, 150, 110, calc(var(--dusk-gold, 0) * 0.6)) 100%);
+}
+
 /* ───────── nuit ───────── */
 #sky::after {
   content: '';
   position: absolute;
   inset: 0;
-  opacity: 0;
-  transition: opacity 1.2s ease;
+  opacity: var(--night, 0);
   background:
     radial-gradient(2px 2px at 12% 18%, #fff8 50%, transparent 51%),
     radial-gradient(2px 2px at 34% 9%, #fff9 50%, transparent 51%),
@@ -1483,9 +1495,6 @@ body.in-dialogue .minimap {
 }
 body.night {
   background: #141a33;
-}
-body.night #sky::after {
-  opacity: 1;
 }
 .pill.daynight {
   min-width: 92px;

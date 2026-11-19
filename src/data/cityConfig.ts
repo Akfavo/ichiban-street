@@ -224,8 +224,22 @@ export const LIGHTING = {
     pointLights: 0,
     pointColor: '#ffc27a',
   },
-  /** durée de la transition jour ↔ nuit (secondes) */
-  transition: 1.2,
+  /**
+   * coucher de soleil : au milieu de la bascule jour → nuit, la lumière passe
+   * par une phase dorée puis rose (le lever de soleil fait le chemin inverse)
+   */
+  dusk: {
+    goldSky: '#ffc98a',
+    goldSun: '#ffae5c',
+    pinkSky: '#f2a0b4',
+    pinkSun: '#ff8a7a',
+    ground: '#9a6a62',
+    /** part maximale de la teinte de crépuscule (0 → 1) */
+    strength: 0.85,
+  },
+  /** durée de la transition jour → nuit (coucher de soleil) et nuit → jour (secondes) */
+  transition: 3.2,
+  transitionToDay: 2,
 };
 
 export const DECOR = {
